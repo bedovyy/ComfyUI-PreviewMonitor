@@ -1,22 +1,42 @@
 const { app } = window.comfyAPI.app;
 const { api } = window.comfyAPI.api;
 
+let _decoding = false;
+let _clearBitmapTimer = null;
 let _bitmap = null;
 let _nodeInfo = { id: null, title: null };
 
-api.addEventListener("executing", ({ detail }) => {
-    if (!detail) {
+const resetPreview = () => {
+    _nodeInfo = { id: null, title: null };
+    _decoding = false;
+
+    clearTimeout(_clearBitmapTimer);
+    _clearBitmapTimer = setTimeout(() => {
+        _bitmap?.close();
         _bitmap = null;
-        _nodeInfo = { id: null, title: null };
-    } else {
-        const node = app.graph.getNodeById(Number(detail.split(":")[0]));
-        _nodeInfo = { id: detail, title: node?.subgraph?.name ?? node?.title ?? node?.type ?? null };
-    }
+        app.graph.setDirtyCanvas(true, false);
+    }, 250);
+};
+
+api.addEventListener("execution_success",     resetPreview);
+api.addEventListener("execution_error",       resetPreview);
+api.addEventListener("execution_interrupted", resetPreview);
+
+api.addEventListener("executing", ({ detail }) => {
+    if (!detail) return;
+    const node = app.graph.getNodeById(Number(detail.split(":")[0]));
+    _nodeInfo = { id: detail, title: node?.subgraph?.name ?? node?.title ?? node?.type ?? null };
     app.graph.setDirtyCanvas(true, false);
 });
 
 api.addEventListener("b_preview", async ({ detail }) => {
-    _bitmap = await createImageBitmap(new Blob([detail], { type: "image/jpeg" }));
+    if (_decoding) return;
+    _decoding = true;
+    const newBitmap = await createImageBitmap(detail);
+    clearTimeout(_clearBitmapTimer);
+    _bitmap?.close();
+    _bitmap = newBitmap;
+    _decoding = false;
     app.graph.setDirtyCanvas(true, false);
 });
 
@@ -55,10 +75,10 @@ app.registerExtension({
                     ctx.drawImage(_bitmap, (w - dw) / 2, (imgH - dh) / 2, dw, dh);
                 } else {
                     ctx.fillStyle = "#666";
-                    ctx.font = "12 px monospace";
+                    ctx.font = "12px monospace";
                     ctx.textAlign = "center";
                     ctx.fillText("waiting for preview...", w / 2, imgH / 2 - 8);
-					ctx.font = "10 px monospace";
+                    ctx.font = "10px monospace";
                     ctx.fillText("(enable preview in Settings > Comfy)", w / 2, imgH / 2 + 8);
                 }
 
